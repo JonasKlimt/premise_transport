@@ -23,7 +23,7 @@ from wurst.errors import NoResults
 
 FILEPATH_VEHICLES_MAP = DATA_DIR / "transport" / "vehicles_map_NEW.yaml"
 
-logger = create_logger("transport")
+logger = create_logger("transport_NEW")
 # TODO: work on logger (reporting.yaml & premise_transport.log)
 # TODO: work on change report
 # TODO: work on scenario report
@@ -46,7 +46,6 @@ def _update_transport(scenario, version, system_model):
         transport.generate_transport_markets()
         transport.generate_unspecified_transport_vehicles()
         transport.relink_exchanges()
-        transport.delete_inventory_datasets()
         scenario["database"] = transport.database 
         scenario["cache"] = transport.cache
         scenario["index"] = transport.index
@@ -290,7 +289,7 @@ class Transport(BaseTransformation):
             if "log parameters" not in dataset:
                 dataset["log parameters"] = {}
 
-            dataset["log parameters"].update({"efficiency change": scaling_factor,})
+            dataset["log parameters"].update({"efficiency change": 1 / scaling_factor,})
             
     def generate_transport_markets(self):
         """
@@ -566,9 +565,10 @@ class Transport(BaseTransformation):
                         exc["name"] = f"{vehicles_map['freight transport'][self.model][key]}"
                         exc["location"] = self.geo.ecoinvent_to_iam_location(dataset["location"])
                         exc["product"] = (f"{vehicles_map['freight transport'][self.model][key]}").replace("market for ", "")
-                        
+        
+        self.empty_ecoinvent_datasets
 
-    def delete_inventory_datasets(self):
+    def empty_ecoinvent_datasets(self):
         """
         The function specifies and deletes inventory datasets.
         In this case transport datasets from ecoinvent, as they
@@ -577,10 +577,17 @@ class Transport(BaseTransformation):
 
         vehicles_map = get_vehicles_mapping()
         
-        ds_to_delete = vehicles_map["ecoinvent freight transport"]
+        ecoinvent_ds = vehicles_map["ecoinvent freight transport"]
+        ds_mapping = vehicles_map["freight transport"][self.model]
 
-        self.database = [
-            ds
-            for ds in self.database
-            if ds["name"] not in ds_to_delete
-        ]
+        # empty the dataset of all exchanges except the reference product and update comment
+        for dataset in self.database:
+            if dataset["name"] in ecoinvent_ds:
+                dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
+                
+                for key, value in ds_mapping.items():
+                    if key in dataset["name"]:
+                        dataset["comment"] = f"This dataset has been replaced by the new dataset {value}."
+                        break # This can be refined as links are only created to market processes
+                    else:
+                        dataset["comment"] = f"This dataset has been replaced by a new dataset."
