@@ -46,6 +46,7 @@ def _update_transport(scenario, version, system_model):
         transport.generate_transport_markets()
         transport.generate_unspecified_transport_vehicles()
         transport.relink_exchanges()
+        transport.empty_ecoinvent_datasets()
         scenario["database"] = transport.database 
         scenario["cache"] = transport.cache
         scenario["index"] = transport.index
@@ -565,8 +566,7 @@ class Transport(BaseTransformation):
                         exc["name"] = f"{vehicles_map['freight transport'][self.model][key]}"
                         exc["location"] = self.geo.ecoinvent_to_iam_location(dataset["location"])
                         exc["product"] = (f"{vehicles_map['freight transport'][self.model][key]}").replace("market for ", "")
-        
-        self.empty_ecoinvent_datasets
+
 
     def empty_ecoinvent_datasets(self):
         """
@@ -582,7 +582,7 @@ class Transport(BaseTransformation):
 
         # empty the dataset of all exchanges except the reference product and update comment
         for dataset in self.database:
-            if dataset["name"] in ecoinvent_ds:
+            if dataset["name"].strip().lower() in (name.strip().lower() for name in ecoinvent_ds):
                 dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
                 
                 for key, value in ds_mapping.items():
