@@ -171,24 +171,43 @@ class Transport(BaseTransformation):
                     
                     ecoinv_region = dataset["location"]
                     
+                    # create copy to leave the original dataset unchanged
+                    new_dataset = copy.deepcopy(ws.get_one(self.database,
+                                                            ws.equals("name", dataset["name"]),
+                                                            ws.equals("location", ecoinv_region)
+                                                            )
+                                                )
+                    
+                    # Create a list that stores the dataset used for copy to later modify
+                    if not any(dataset["name"] == new_dataset["name"] and dataset["location"] == new_dataset["location"] for dataset in old_datasets):
+                        old_datasets.append(copy.deepcopy(new_dataset))
+                    
                     # change dataset location
                     for IAM_reg, eco_reg in region_mapping.items():
                         if eco_reg == ecoinv_region:
-                            dataset["location"] = IAM_reg
+                            new_dataset["location"] = IAM_reg
                             # change 'production' exchange location
-                            for exchange in dataset['exchanges']:
-                                if exchange['name'] == dataset['name']:
+                            for exchange in new_dataset['exchanges']:
+                                if exchange['name'] == new_dataset['name']:
                                     exchange['location'] = IAM_reg
                             break
-                        
-                    changed_datasets_location.append([dataset["name"],dataset["location"]])
+                    
+                    new_dataset["comment"] = f"Dataset for the region {new_dataset['location']}. {new_dataset['comment']}" 
+                    new_dataset["code"] = str(uuid.uuid4().hex)
+                    for exchange in new_dataset["exchanges"]:
+                        if exchange["type"] == "production":
+                            exchange["location"] = new_dataset['location']
+                            
+                    changed_datasets_location.append([new_dataset["name"],new_dataset["location"]])
                     
                     # add to log
-                    self.write_log(dataset=dataset, status="updated")
+                    self.write_log(dataset=new_dataset, status="created")
                     # add it to list of created datasets
-                    self.add_to_index(dataset)
+                    self.add_to_index(new_dataset)
                     
-                    self.adjust_transport_efficiency(dataset)
+                    self.adjust_transport_efficiency(new_dataset)
+                    
+                    new_datasets.append(new_dataset)
 
         # create new datasets for IAM regions that are not covered yet, based on the "RoW" or "RER" dataset
         for region in self.iam_data.regions:
@@ -207,7 +226,7 @@ class Transport(BaseTransformation):
                                                             )
                                                     )
                         
-                    # Create a list that stores the dataset used for copy to later delete them from the database
+                    # Create a list that stores the dataset used for copy to later modify
                     if not any(dataset["name"] == new_dataset["name"] and dataset["location"] == new_dataset["location"] for dataset in old_datasets):
                         old_datasets.append(copy.deepcopy(new_dataset))
 
@@ -231,7 +250,8 @@ class Transport(BaseTransformation):
 
         for dataset in list(self.database):  # Create a copy for iteration
             if any(old_dataset["name"] == dataset["name"] and old_dataset["location"] == dataset["location"] for old_dataset in old_datasets):
-                self.database.remove(dataset)
+                dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
+                dataset["comment"] = "This dataset has been updated and the region changed to an IAM region, please refer to the new dataset in the IAM region for the location you are looking for."
 
         
     def adjust_transport_efficiency(self, dataset):
