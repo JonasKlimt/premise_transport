@@ -45,8 +45,8 @@ def _update_transport(scenario, version, system_model):
         transport.relink_datasets()
         transport.generate_transport_markets()
         transport.generate_unspecified_transport_vehicles()
-        transport.relink_exchanges()
         transport.empty_ecoinvent_datasets()
+        # transport.relink_exchanges() #TODO: there are relinks that link to non exisitng datasets (these do not exist because the IAM does not provide varibles for them)
         scenario["database"] = transport.database 
         scenario["cache"] = transport.cache
         scenario["index"] = transport.index
@@ -154,105 +154,26 @@ class Transport(BaseTransformation):
         railfreight_dataset_names = self.iam_data.railfreight_markets.coords["variables"].values.tolist()
         freight_transport_dataset_names = roadfreight_dataset_names + railfreight_dataset_names
         
-        new_datasets = []
-        old_datasets = []
-        changed_datasets_location = []
+        transport_ds = [ds for ds in self.database if ds["name"] in freight_transport_dataset_names]
         
-        # change the location of the datasets to IAM regions
-        for dataset in self.database:
-            # only applicable for freight train datasets as road freight only exist for the region of RER
-            if dataset["name"] in railfreight_dataset_names:
-                if dataset["location"] != "RoW":
-                    
-                    region_mapping = self.region_to_proxy_dataset_mapping(
-                        name=dataset["name"],
-                        ref_prod=dataset["reference product"],
-                    )
-                    
-                    ecoinv_region = dataset["location"]
-                    
-                    # create copy to leave the original dataset unchanged
-                    new_dataset = copy.deepcopy(ws.get_one(self.database,
-                                                            ws.equals("name", dataset["name"]),
-                                                            ws.equals("location", ecoinv_region)
-                                                            )
-                                                )
-                    
-                    # Create a list that stores the dataset used for copy to later modify
-                    if not any(dataset["name"] == new_dataset["name"] and dataset["location"] == new_dataset["location"] for dataset in old_datasets):
-                        old_datasets.append(copy.deepcopy(new_dataset))
-                    
-                    # change dataset location
-                    for IAM_reg, eco_reg in region_mapping.items():
-                        if eco_reg == ecoinv_region:
-                            new_dataset["location"] = IAM_reg
-                            # change 'production' exchange location
-                            for exchange in new_dataset['exchanges']:
-                                if exchange['name'] == new_dataset['name']:
-                                    exchange['location'] = IAM_reg
-                            break
-                    
-                    new_dataset["comment"] = f"Dataset for the region {new_dataset['location']}. {new_dataset['comment']}" 
-                    new_dataset["code"] = str(uuid.uuid4().hex)
-                    for exchange in new_dataset["exchanges"]:
-                        if exchange["type"] == "production":
-                            exchange["location"] = new_dataset['location']
-                            
-                    changed_datasets_location.append([new_dataset["name"],new_dataset["location"]])
-                    
-                    # add to log
-                    self.write_log(dataset=new_dataset, status="created")
-                    # add it to list of created datasets
-                    self.add_to_index(new_dataset)
-                    
-                    self.adjust_transport_efficiency(new_dataset)
-                    
-                    new_datasets.append(new_dataset)
-
-        # create new datasets for IAM regions that are not covered yet, based on the "RoW" or "RER" dataset
-        for region in self.iam_data.regions:
-            for freight_transport_ds in freight_transport_dataset_names:
-                if [freight_transport_ds, region] not in changed_datasets_location and region != "World":                  
-                    try: # RoW dataset to be used for other IAM regions
-                        new_dataset = copy.deepcopy(ws.get_one(self.database,
-                                                                ws.equals("name", freight_transport_ds), 
-                                                                ws.equals("location", "RoW")
-                                                                )
-                                                    )
-                    except NoResults: # if no RoW dataset can be found use RER dataset
-                        new_dataset = copy.deepcopy(ws.get_one(self.database,
-                                                                ws.equals("name", freight_transport_ds), 
-                                                                ws.equals("location", "RER")
-                                                            )
-                                                    )
-                        
-                    # Create a list that stores the dataset used for copy to later modify
-                    if not any(dataset["name"] == new_dataset["name"] and dataset["location"] == new_dataset["location"] for dataset in old_datasets):
-                        old_datasets.append(copy.deepcopy(new_dataset))
-
-                    new_dataset["location"] = region
-                    new_dataset["code"] = str(uuid.uuid4().hex)
-                    new_dataset["comment"] = f"Dataset for the region {region}. {new_dataset['comment']}"
-                    for exchange in new_dataset["exchanges"]:
-                        if exchange["type"] == "production":
-                            exchange["location"] = region
-                    
-                    # add to log
-                    self.write_log(dataset=new_dataset, status="created")
-                    # add it to list of created datasets
-                    self.add_to_index(new_dataset)
-                    
-                    self.adjust_transport_efficiency(new_dataset)
-                    
-                    new_datasets.append(new_dataset)
-
-        self.database.extend(new_datasets)
-
-        for dataset in list(self.database):  # Create a copy for iteration
-            if any(old_dataset["name"] == dataset["name"] and old_dataset["location"] == dataset["location"] for old_dataset in old_datasets):
-                dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
-                dataset["comment"] = "This dataset has been updated and the region changed to an IAM region, please refer to the new dataset in the IAM region for the location you are looking for."
-
+        new_datasets = []
+        
+        for dataset in list(set([(ds["name"], ds["reference product"]) for ds in transport_ds])):
+            new_datasets.extend(
+                self.fetch_proxies(
+                    subset = transport_ds,
+                    name = dataset[0],
+                    ref_prod = dataset[1],
+                ).values()
+            )
+        
+        for new_ds in new_datasets:
+            self.adjust_transport_efficiency(new_ds)
+            if not self.is_in_index(new_ds):
+                self.add_to_index(new_ds)
+                self.database.append(new_ds)
+                logger.info(f"New dataset {new_ds['name']} in {new_ds['location']} has been created.")
+                
         
     def adjust_transport_efficiency(self, dataset):
         """
@@ -391,8 +312,6 @@ class Transport(BaseTransformation):
                     # add it to list of created datasets
                     self.add_to_index(market)
                     
-                    # logger.info(f"Created dataset MARKETS {market['name']} for region {region}.")
-                            
                 new_transport_markets.append(market)
         
         
@@ -549,8 +468,8 @@ class Transport(BaseTransformation):
                 # only add markets that have inputs
                 if len(vehicle_unspecified["exchanges"]) > 1:             
                     weight_specific_ds.append(vehicle_unspecified)
-                    logger.info(f"Created dataset UNSPECIFIED {vehicle_unspecified['name']} for region {region}.")
-                
+                    # logger.info(f"Created dataset SIZE MARKETS {vehicle_unspecified['name']} for region {region}.")
+
                 # add to log
                 self.write_log(dataset=vehicle_unspecified, status="created")
                 # add it to list of created datasets
@@ -560,7 +479,32 @@ class Transport(BaseTransformation):
         self.database.extend(weight_specific_ds)
                                               
         #TODO: regional unspecified vehicles per driving cycle could have same shares but are not used for markets?
+
+
+    def empty_ecoinvent_datasets(self):
+        """
+        The function specifies and deletes inventory datasets.
+        In this case transport datasets from ecoinvent, as they
+        are replaced by the additional LCI imports.
+        """
+
+        vehicles_map = get_vehicles_mapping()
         
+        ecoinvent_ds = vehicles_map["ecoinvent freight transport"]
+        ds_mapping = vehicles_map["freight transport"][self.model]
+
+        # empty the dataset of all exchanges except the reference product and update comment
+        for dataset in self.database:
+            if dataset["name"].strip().lower() in (name.strip().lower() for name in ecoinvent_ds):
+                dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
+                
+                for key, value in ds_mapping.items():
+                    if key in dataset["name"]:
+                        dataset["comment"] = f"This dataset has been replaced by the new dataset {value}."
+                        break # This can be refined as links are only created to market processes
+                    else:
+                        dataset["comment"] = f"This dataset has been replaced by a new dataset."
+
     
     def relink_exchanges(self):
         """
@@ -591,28 +535,6 @@ class Transport(BaseTransformation):
                         exc["name"] = f"{vehicles_map['freight transport'][self.model][key]}"
                         exc["location"] = self.geo.ecoinvent_to_iam_location(dataset["location"])
                         exc["product"] = (f"{vehicles_map['freight transport'][self.model][key]}").replace("market for ", "")
-
-
-    def empty_ecoinvent_datasets(self):
-        """
-        The function specifies and deletes inventory datasets.
-        In this case transport datasets from ecoinvent, as they
-        are replaced by the additional LCI imports.
-        """
-
-        vehicles_map = get_vehicles_mapping()
-        
-        ecoinvent_ds = vehicles_map["ecoinvent freight transport"]
-        ds_mapping = vehicles_map["freight transport"][self.model]
-
-        # empty the dataset of all exchanges except the reference product and update comment
-        for dataset in self.database:
-            if dataset["name"].strip().lower() in (name.strip().lower() for name in ecoinvent_ds):
-                dataset["exchanges"] = [exc for exc in dataset["exchanges"] if exc["type"] not in ["technosphere", "biosphere"]]
-                
-                for key, value in ds_mapping.items():
-                    if key in dataset["name"]:
-                        dataset["comment"] = f"This dataset has been replaced by the new dataset {value}."
-                        break # This can be refined as links are only created to market processes
-                    else:
-                        dataset["comment"] = f"This dataset has been replaced by a new dataset."
+                        
+                        if exc["name"] == "market for transport, freight, lorry, 40t gross weight, unspecified powertrain":
+                            logger.info(f"Replaced exchange in dataset {dataset['name']} with {exc['name']} for region {exc['location']}.")
