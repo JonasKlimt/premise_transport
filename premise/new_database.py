@@ -857,22 +857,22 @@ class NewDatabase:
                 "func": _update_emissions,
                 "args": (self.version, self.system_model, self.gains_scenario),
             },
-            "cars": {
-                "func": _update_vehicles,
-                "args": ("car", self.version, self.system_model),
-            },
-            "two_wheelers": {
-                "func": _update_vehicles,
-                "args": ("two wheeler", self.version, self.system_model),
-            },
-            "trucks": {
-                "func": _update_vehicles,
-                "args": ("truck", self.version, self.system_model),
-            },
-            "buses": {
-                "func": _update_vehicles,
-                "args": ("bus", self.version, self.system_model),
-            },
+            # "cars": {
+            #     "func": _update_vehicles,
+            #     "args": ("car", self.version, self.system_model),
+            # },
+            # "two_wheelers": {
+            #     "func": _update_vehicles,
+            #     "args": ("two wheeler", self.version, self.system_model),
+            # },
+            # "trucks": {
+            #     "func": _update_vehicles,
+            #     "args": ("truck", self.version, self.system_model),
+            # },
+            # "buses": {
+            #     "func": _update_vehicles,
+            #     "args": ("bus", self.version, self.system_model),
+            # },
             "transport": {
                 "func": _update_transport,
                 "args": (self.version, self.system_model),
