@@ -23,7 +23,7 @@ from wurst.errors import NoResults
 
 FILEPATH_VEHICLES_MAP = DATA_DIR / "transport" / "vehicles_map_NEW.yaml"
 
-logger = create_logger("transport_NEW")
+logger = create_logger("transport")
 # TODO: work on logger (reporting.yaml & premise_transport.log)
 # TODO: work on change report
 # TODO: work on scenario report
@@ -390,6 +390,8 @@ class Transport(BaseTransformation):
                     self.write_log(dataset=market, status="created")
                     # add it to list of created datasets
                     self.add_to_index(market)
+                    
+                    # logger.info(f"Created dataset MARKETS {market['name']} for region {region}.")
                             
                 new_transport_markets.append(market)
         
@@ -455,102 +457,105 @@ class Transport(BaseTransformation):
         # create regional size dependent technology-average markets
         for region in self.iam_data.regions:
             for market, var in dict_transport_ES_var.items():
-                vehicle_unspecified = {
-                    "name": market, 
-                    "reference product": market.replace("market for ", ""),
-                    "unit": "ton kilometer",
-                    "location": region,
-                    "exchanges": [
-                        {
-                            "name": market,
-                            "product": market.replace("market for ", ""),
-                            "unit": "ton kilometer",
-                            "location": region,
-                            "type": "production",
-                            "amount": 1,
-                        }
-                    ],
-                    "code": str(uuid.uuid4().hex),
-                    "database": "premise",
-                    "comment": f"Fleet-average vehicle for the year {self.year}, "
-                    f"for the region {region}.",
-                }
-                
-                # add exchanges for regional datasets
-                if region != "World":
-                    for vehicle_types, names in dict_vehicle_types.items():
-                        variable_key = var + "|" + vehicle_types
-                        if variable_key in self.iam_data.data.variables:
-                            # calculate regional shares
-                            regional_weight_shares = (
-                                ( 
-                                self.iam_data.data.sel(
-                                    region=region, 
-                                    variables=variable_key, 
-                                    year=self.year).values
-                                )/(
-                                self.iam_data.data.sel(
-                                    region=region, 
-                                    variables=var, 
-                                    year=self.year).item()
+                if var in self.iam_data.data.variables:
+                    vehicle_unspecified = {
+                        "name": market, 
+                        "reference product": market.replace("market for ", ""),
+                        "unit": "ton kilometer",
+                        "location": region,
+                        "exchanges": [
+                            {
+                                "name": market,
+                                "product": market.replace("market for ", ""),
+                                "unit": "ton kilometer",
+                                "location": region,
+                                "type": "production",
+                                "amount": 1,
+                            }
+                        ],
+                        "code": str(uuid.uuid4().hex),
+                        "database": "premise",
+                        "comment": f"Fleet-average vehicle for the year {self.year}, "
+                        f"for the region {region}.",
+                    }
+                    
+                    # add exchanges for regional datasets
+                    if region != "World":
+                        for vehicle_types, names in dict_vehicle_types.items():
+                            variable_key = var + "|" + vehicle_types
+                            if variable_key in self.iam_data.data.variables:
+                                # calculate regional shares
+                                regional_weight_shares = (
+                                    ( 
+                                    self.iam_data.data.sel(
+                                        region=region, 
+                                        variables=variable_key, 
+                                        year=self.year).values
+                                    )/(
+                                    self.iam_data.data.sel(
+                                        region=region, 
+                                        variables=var, 
+                                        year=self.year).item()
+                                    )
                                 )
-                            )
 
-                            if regional_weight_shares > 0:
-                                if "diesel" in names or "compressed gas" in names:
-                                    euro = ", EURO-VI"
-                                else:
-                                    euro = ""
+                                if regional_weight_shares > 0:
+                                    if "diesel" in names or "compressed gas" in names:
+                                        euro = ", EURO-VI"
+                                    else:
+                                        euro = ""
+                                        
+                                    vehicle_unspecified["exchanges"].append(
+                                        {
+                                            "name": names + ", " + market.split(',')[3].strip() + euro + ", long haul",
+                                            "product": "transport, freight, lorry" + euro,
+                                            "unit": "ton kilometer",
+                                            "location": region,
+                                            "type": "technosphere",
+                                            "amount": regional_weight_shares,
+                                        }
+                                    )
+                    
+                    # add exchanges for global dataset          
+                    elif region == "World":
+                        for reg in self.iam_data.regions:
+                            if reg != "World":
+                                    regional_weight_shares = (
+                                        ( 
+                                        self.iam_data.data.sel(
+                                            region=reg, 
+                                            variables=var, 
+                                            year=self.year).values
+                                        )/(
+                                        self.iam_data.data.sel(
+                                            region="World", 
+                                            variables=var, 
+                                            year=self.year).item()
+                                        )
+                                    )
                                     
-                                vehicle_unspecified["exchanges"].append(
-                                    {
-                                        "name": names + ", " + market.split(',')[3].strip() + euro + ", long haul",
-                                        "product": "transport, freight, lorry" + euro,
-                                        "unit": "ton kilometer",
-                                        "location": region,
-                                        "type": "technosphere",
-                                        "amount": regional_weight_shares,
-                                    }
-                                )
-                
-                # add exchanges for global dataset          
-                elif region == "World":
-                    for region in self.iam_data.regions:
-                        if region != "World":
-                            regional_weight_shares = (
-                                ( 
-                                self.iam_data.data.sel(
-                                    region=region, 
-                                    variables=var, 
-                                    year=self.year).values
-                                )/(
-                                self.iam_data.data.sel(
-                                    region="World", 
-                                    variables=var, 
-                                    year=self.year).item()
-                                )
-                            )
-                            
-                            if regional_weight_shares > 0:
-                                vehicle_unspecified["exchanges"].append(
-                                    {
-                                        "name": market,
-                                        "product": market.replace("market for ", ""),
-                                        "unit": "ton kilometer",
-                                        "location": region,
-                                        "type": "technosphere",
-                                        "amount": regional_weight_shares,
-                                    }
-                                )
-                
+                                    if regional_weight_shares > 0:
+                                        vehicle_unspecified["exchanges"].append(
+                                            {
+                                                "name": market,
+                                                "product": market.replace("market for ", ""),
+                                                "unit": "ton kilometer",
+                                                "location": reg,
+                                                "type": "technosphere",
+                                                "amount": regional_weight_shares,
+                                            }
+                                        )
+                                        
                 # only add markets that have inputs
                 if len(vehicle_unspecified["exchanges"]) > 1:             
                     weight_specific_ds.append(vehicle_unspecified)
+                    logger.info(f"Created dataset UNSPECIFIED {vehicle_unspecified['name']} for region {region}.")
                 
                 # add to log
                 self.write_log(dataset=vehicle_unspecified, status="created")
                 # add it to list of created datasets
                 self.add_to_index(vehicle_unspecified)
+                
                 
         self.database.extend(weight_specific_ds)
                                               
