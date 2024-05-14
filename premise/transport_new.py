@@ -214,7 +214,9 @@ class Transport(BaseTransformation):
                 technosphere_filters=[
                     ws.either(*[ws.contains("name", x) for x in energy_carriers]) # TODO: apply diesel efficiency increase to diesel shunting for electricity and hydrogen datasets
                 ],
-                biosphere_filters=[ws.contains("name", x) for x in fuel_combustion_emissions],
+                biosphere_filters=[
+                    ws.either(*[ws.contains("name", x) for x in fuel_combustion_emissions])
+                ],
                 remove_uncertainty=False,
             )
             ########## how can there be a scaling factor for hydrogen if FE and ES variables are 0?
