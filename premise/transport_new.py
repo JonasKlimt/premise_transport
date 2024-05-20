@@ -169,10 +169,11 @@ class Transport(BaseTransformation):
         
         for new_ds in new_datasets:
             self.adjust_transport_efficiency(new_ds)
+            self.adjust_material_efficiency(new_ds)
             if not self.is_in_index(new_ds):
                 self.add_to_index(new_ds)
                 self.database.append(new_ds)
-                logger.info(f"New dataset {new_ds['name']} in {new_ds['location']} has been created.")
+                #logger.info(f"New dataset {new_ds['name']} in {new_ds['location']} has been created.")
                 
         
     def adjust_transport_efficiency(self, dataset):
@@ -212,14 +213,13 @@ class Transport(BaseTransformation):
                 dataset,
                 scaling_factor,
                 technosphere_filters=[
-                    ws.either(*[ws.contains("name", x) for x in energy_carriers]) # TODO: apply diesel efficiency increase to diesel shunting for electricity and hydrogen datasets
+                    ws.either(*[ws.contains("name", x) for x in energy_carriers]) # efficiency increase of dataset for train freight transport is also used to update shunting efficiency
                 ],
                 biosphere_filters=[
                     ws.either(*[ws.contains("name", x) for x in fuel_combustion_emissions])
                 ],
                 remove_uncertainty=False,
             )
-            ########## how can there be a scaling factor for hydrogen if FE and ES variables are 0?
             
             # Update the comments
             text = (
@@ -234,6 +234,20 @@ class Transport(BaseTransformation):
                 dataset["log parameters"] = {}
 
             dataset["log parameters"].update({"efficiency change": 1 / scaling_factor,})
+    
+            
+    def adjust_material_efficiency(self, dataset):
+        """
+        This function relinks the exchange of the actual vehicle (for the base year 2020)
+        and reconnects it to the vehicle production (with material efficiency) for the year
+        the database is created for.
+        The code selects inventories for trucks already imported from carculator.
+        """
+        
+        for exc in dataset["exchanges"]:
+            if "duty truck" in exc["name"]:
+                exc["name"] = exc["name"] + ", " + str(self.year)
+        
             
     def generate_transport_markets(self):
         """
@@ -538,5 +552,5 @@ class Transport(BaseTransformation):
                         exc["location"] = self.geo.ecoinvent_to_iam_location(dataset["location"])
                         exc["product"] = (f"{vehicles_map['freight transport'][self.model][key]}").replace("market for ", "")
                         
-                        if exc["name"] == "market for transport, freight, lorry, 40t gross weight, unspecified powertrain":
-                            logger.info(f"Replaced exchange in dataset {dataset['name']} with {exc['name']} for region {exc['location']}.")
+                        # if exc["name"] == "market for transport, freight, lorry, 40t gross weight, unspecified powertrain":
+                        #    # logger.info(f"Replaced exchange in dataset {dataset['name']} with {exc['name']} for region {exc['location']}.")
